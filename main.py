@@ -1,4 +1,5 @@
 import gym
+import numpy as np
 from PIL import Image
 from lshash.lshash import LSHash
 from collections import deque
@@ -6,13 +7,9 @@ from random import random
 from diskcache import FanoutCache, Cache
 qtable = Cache('cache')
 qtable.clear()
-table = dict()
-from time import sleep
-import numpy as np
+
 env = gym.make('Breakout-v0')
 lshs = LSHash(500, 8192)
-
-
 LEARNING_RATE = 0.15
 DISCOUNT = 0.95
 EPISODES = 25000
@@ -48,7 +45,6 @@ def get_action(obs_seq):
     p = (1 / np.sum(actions)) * actions
     print(p)
     action = np.random.choice(range(env.action_space.n), p=p)
-    # print(action)
     return action
     #return np.argmax(actions)
 
