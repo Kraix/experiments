@@ -1,0 +1,181 @@
+from keras.models import Model
+from keras.layers import Input, Dense
+from keras.optimizers import Adam
+from collections import deque
+from random import shuffle, sample, random, choice
+import numpy as np
+
+# LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.001
+#LEARNING_RATE = 0.0000001
+DISCOUNT = 0.99999999999999
+REPLAY_SIZE = 3000
+BATCH_LEARNING = False
+SHUFFLE_REPLAY = True
+EPSILON = 0.99
+EPSILON_DECAY = 0.01
+EPSILON_MIN = 0.01
+SYNC_DELAY = 5
+RENDER = False
+PRIORITIZED_EXPERIENCE_REPLAY = False
+E = 0.0000001
+
+env_name = ['CartPole-v0', 'LunarLander-v2'][0]
+
+
+class ReplayMemory:
+    def __init__(self, length):
+        self.memory = deque(maxlen=length)
+    def add(self,):
+        pass
+
+class Agent:
+    replay_buffer = deque(maxlen=REPLAY_SIZE)
+    counter = 0
+
+    def __init__(self, input_size, output_size):
+        self.input_size, self.output_size = input_size, output_size
+        self.model = self.init_model(input_size, output_size)
+        self.target_model = self.init_model(input_size, output_size)
+        self.target_model.set_weights(self.model.get_weights())
+    #@staticmethod
+
+    def init_model(self, input_size, output_size):
+        input = Input(shape=(input_size,))
+        l = Dense(input_size*9, activation='selu', name='layer1')(input)
+        l = Dense(input_size*9, activation='selu',name='layer2')(l)
+        l = Dense(input_size*9, activation='selu', name='layer3')(l)
+        l = Dense(input_size*9, activation='selu', name='layer4')(l)
+        l = Dense(input_size * 9, activation='selu', name='layer5')(l)
+        o = Dense(output_size, activation='linear', name='layer6')(l)
+        model = Model(inputs=[input], outputs=[o])
+        model.summary()
+        model.compile(optimizer=Adam(lr=LEARNING_RATE), loss='mse')
+        return model
+
+    def save_into_replay(self, observation, action, reward, done, next_observation):
+        self.replay_buffer.append([observation, action, reward, done, next_observation])
+    def get_action(self, observation):
+        q_values = self.model.predict(observation)
+        #print(f'Q-vals: {q_values}')
+        if random() > EPSILON:
+            q_values = self.model.predict(observation)[0]
+            action = np.argmax(q_values)
+        else:
+            action = choice(range(self.output_size))
+        return action
+
+    def add_to_replay_buffer(self):
+        pass
+
+    def synchronize_networks(self):
+        weights = self.model.get_weights()
+        self.target_model.set_weights(weights)
+
+    # sample_from_replay
+    def get_probabilities(self):
+        probabilities = []
+        for data in self.replay_buffer:
+            observation, action, reward, done, next_observation = data
+            if done:
+                q_target = reward
+                q_value = self.target_model.predict(observation)[0][action]
+                td_error = abs(q_target - q_value)
+                probability = td_error + E
+                probabilities.append(probability)
+            else:
+                q_value = self.target_model.predict(observation)[0][action]
+                q_action = np.argmax(self.model.predict(next_observation)[0])
+                q_target = reward + DISCOUNT * self.target_model.predict(next_observation)[0][q_action]
+                td_error = abs(q_target - q_value)
+                probability = td_error + E
+                probabilities.append(probability)
+        normalized_probabilities = np.array(probabilities)/np.sum(probabilities)
+        return normalized_probabilities
+
+    def learn_from_replay(self):
+        if self.counter >= SYNC_DELAY:
+            self.synchronize_networks()
+            print(f'Synchronizing networks!')
+            self.counter = 0
+        else:
+            self.counter += 1
+        probabilities = self.get_probabilities()
+        length = 100
+        if len(self.replay_buffer) < 100:
+            length = len(self.replay_buffer)
+        choices = np.random.choice(range(len(self.replay_buffer)), length, p=probabilities, replace=False)
+        # print(f'choices: {choices}')
+        # print(f'props: {probabilities}')
+        # choices1 = np.random.choice(len(self.replay_buffer), 20, p=probabilities)
+        # choices2 = np.random.choice(len(self.replay_buffer), 80)
+        # choices = []
+        # for n in choices1:
+        #     choices.append(n)
+        # for n in choices2:
+        #     choices.append(n)
+        #print(f'Choices: {choices}')
+        for i in choices:
+            observation, action, reward, done, next_observation = self.replay_buffer[i]
+            if done:
+                q_target = reward
+                q_values = self.target_model.predict(observation)
+                q_values[0][action] = q_target
+                self.model.train_on_batch(observation, q_values)
+                #self.model.fit(observation, q_values)
+            else:
+                # q_values = self.action_model.predict(observation)
+                q_values = self.target_model.predict(observation)
+                q_action = np.argmax(self.model.predict(next_observation)[0])
+                q_target = reward + DISCOUNT * self.target_model.predict(next_observation)[0][q_action]
+                # q_target = reward + DISCOUNT * np.max(self.action_model.predict(next_observation)[0])
+                q_values[0][action] = q_target
+                self.model.train_on_batch(observation, q_values)
+                #self.model.fit(observation, q_values)
+        #self.replay_buffer.clear()
+        # reward = 0
+        # discount = 0
+        # next_q = [0,1,2,4]
+        # q_target = reward + discount * np.max(next_q)
+
+
+import gym
+env = gym.make(env_name)
+output_size = env.action_space.n
+input_size = env.observation_space.shape[0]*10
+agent = Agent(input_size, output_size)
+steps = 0
+average_reward = 0
+global_reward = 0
+for i_episode in range(20000):
+    observation = env.reset()
+    ep_reward = 0
+    sequence = deque([observation for x in range(10)],maxlen=10)
+    for t in range(1000):
+        if RENDER:
+            env.render()
+        steps += 1
+        array_seq = np.array(sequence)
+        array_seq = array_seq.flatten()
+        action = agent.get_action(np.array([array_seq]))
+        next_observation, reward, done, info = env.step(action)
+        sequence.append(next_observation)
+        next_array_seq = np.array(sequence)
+        next_array_seq = next_array_seq.flatten()
+        agent.save_into_replay(np.array([array_seq]), action, reward, done, np.array([next_array_seq]))
+        # observation = next_observation
+        array_seq = next_array_seq
+        ep_reward += reward
+        if done:
+            # print(f'Epsilon: {EPSILON}')
+            # print("Episode nr: {}\tfinished after {} timesteps and reward: {}".format(i_episode, t+1, ep_reward))
+            #average_reward = (average_reward + reward)/steps
+            global_reward += ep_reward
+            average_reward = global_reward / (i_episode + 1)
+            print(f'Epsilon: {EPSILON}\tAverage reward {average_reward}\tafter {steps} steps Episode reward: {ep_reward}\t')
+            break
+    agent.learn_from_replay()
+    if EPSILON > EPSILON_MIN:
+        #EPSILON -= EPSILON * EPSILON_DECAY
+        EPSILON -= EPSILON_DECAY
+env.close()
